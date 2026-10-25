@@ -1,0 +1,20 @@
+
+fastapi
+uvicorn[standard]
+python-multipart
+
+# PDF and image handling
+PyMuPDF
+Pillow
+
+# AI model integration
+httpx
+
+# Field matching and mapping
+rapidfuzz
+
+# Excel export
+openpyxl
+
+# Testing
+pytest

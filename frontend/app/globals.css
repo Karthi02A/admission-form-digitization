@@ -1,0 +1,57 @@
+@import "tailwindcss";
+
+@theme {
+  --color-ink: #172b4d;
+  --color-muted: #65758b;
+  --color-line: #e1e7ef;
+  --color-brand: #1769c2;
+}
+
+:root {
+  color-scheme: light;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  min-height: 100%;
+  width: 100%;
+}
+
+body {
+  margin: 0;
+  background: #f3f6fa;
+  color: #172b4d;
+  font-family: Arial, Helvetica, sans-serif;
+  overflow-wrap: anywhere;
+}
+
+button, input, textarea, select { font: inherit; }
+button { touch-action: manipulation; }
+button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-visible {
+  outline: 3px solid #8bbcff;
+  outline-offset: 2px;
+}
+
+img, canvas, video { max-width: 100%; }
+.scrollbar-thin { scrollbar-width: thin; }
+
+@media (max-width: 640px) {
+  body { font-size: 14px; }
+}
+
+/* Consistent, subtle hover feedback for enabled controls across both screens. */
+button:not(:disabled) {
+  transition: background-color 160ms ease, border-color 160ms ease, color 160ms ease, box-shadow 160ms ease, transform 160ms ease;
+}
+button:not(:disabled):hover {
+  box-shadow: 0 2px 7px rgb(23 43 77 / 10%);
+}
+button:disabled {
+  box-shadow: none;
+}
+nextjs-portal {
+  display: none !important;
+}

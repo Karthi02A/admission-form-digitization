@@ -1,0 +1,31 @@
+{
+  "name": "admission-form-frontend",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev --hostname 127.0.0.1",
+    "build": "next build",
+    "start": "next start --hostname 127.0.0.1",
+    "lint": "eslint app components lib",
+    "typecheck": "tsc --noEmit",
+    "postinstall": "node scripts/copy-pdf-worker.mjs"
+  },
+  "dependencies": {
+    "next": "16.4.2",
+    "pdfjs-dist": "4.10.38",
+    "react": "19.3.1",
+    "react-dom": "19.3.1"
+  },
+  "devDependencies": {
+  "@tailwindcss/postcss": "4.3.3",
+  "@typescript-eslint/eslint-plugin": "8.72.0",
+  "@typescript-eslint/parser": "8.72.0",
+  "@types/node": "24.10.0",
+  "@types/react": "19.2.7",
+  "@types/react-dom": "19.2.3",
+  "eslint": "10.13.0",
+  "eslint-plugin-react-hooks": "7.1.1",
+    "tailwindcss": "4.3.3",
+    "typescript": "5.9.3"
+  }
+}
