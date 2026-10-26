@@ -25,7 +25,7 @@ body {
   background: #f3f6fa;
   color: #172b4d;
   font-family: Arial, Helvetica, sans-serif;
-  overflow-wrap: anywhere;
+  overflow-wrap: normal;
 }
 
 button, input, textarea, select { font: inherit; }
