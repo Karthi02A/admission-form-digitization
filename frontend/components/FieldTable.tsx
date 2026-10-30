@@ -5,12 +5,22 @@ import type { SaveState } from "@/lib/types";
 
 type Props = {
   fields: Record<string, string>;
+  fieldConfidence?: Record<string, number>;
   selectedField: string;
   saveStates: Record<string, SaveState>;
   onSelect: (field: string) => void;
   onChange: (field: string, value: string) => void;
   onRetry: (field: string) => void;
 };
+
+const criticalFields = new Set([
+  "Student Name",
+  "Date of Birth",
+  "Roll No",
+  "Father's Name",
+  "Mother's Name",
+  "Aadhaar No",
+]);
 
 const multilineFields = new Set([
   "Address",
@@ -23,6 +33,7 @@ const multilineFields = new Set([
 
 export default function FieldTable({
   fields,
+  fieldConfidence = {},
   selectedField,
   saveStates,
   onSelect,
@@ -63,7 +74,43 @@ export default function FieldTable({
             )
             .map(([field, value]) => {
               const status = saveStates[field];
-              const missing = !value?.trim();
+              const normalizedValue = value?.trim() ?? "";
+
+              // Admission Date: display "-" when blank, without review styling.
+              const isAdmissionDate = field === "Admission Date";
+              const displayValue =
+                isAdmissionDate && !normalizedValue
+                  ? "-"
+                  : value || "";
+
+              const missing =
+                !normalizedValue && !isAdmissionDate;
+
+              const rawScore = fieldConfidence[field];
+
+              const score =
+                typeof rawScore === "number" &&
+                Number.isFinite(rawScore) &&
+                rawScore >= 0 &&
+                rawScore <= 100
+                  ? rawScore
+                  : 0;
+
+              const confidenceColor =
+                score >= 95
+                  ? "#16A34A"
+                  : score >= 85
+                    ? "#F59E0B"
+                    : "#DC2626";
+
+              const confidenceLabel =
+                score >= 95
+                  ? "High confidence"
+                  : score >= 85
+                    ? "Review recommended"
+                    : "Low confidence — review this field";
+
+              const critical = criticalFields.has(field);
               const Input = multilineFields.has(field)
                 ? "textarea"
                 : "input";
@@ -80,9 +127,17 @@ export default function FieldTable({
                   <th
                     scope="row"
                     onClick={() => onSelect(field)}
-                    className="cursor-pointer break-words [overflow-wrap:break-word] border-b border-slate-100 px-2 py-2.5 text-left align-top font-medium text-slate-700 sm:px-3"
+                    className="cursor-pointer break-words [overflow-wrap:break-word] border-b border-slate-100 px-2 py-2.5 text-left align-top font-medium sm:px-3"
                   >
-                    {field}
+                    {critical ? (
+                      <span className="inline-block rounded-md border-l-[5px] border-red-600 bg-red-50 px-3 py-2 text-red-800">
+                        {field}
+                      </span>
+                    ) : (
+                      <span className="text-slate-700">
+                        {field}
+                      </span>
+                    )}
                   </th>
 
                   <td
@@ -91,10 +146,12 @@ export default function FieldTable({
                   >
                     <div className="flex min-w-0 items-start gap-1.5 sm:gap-2">
                       <Input
-                        value={value || ""}
+                        value={displayValue}
                         aria-label={`Value for ${field}`}
                         placeholder={
-                          missing ? "Not detected — enter value" : ""
+                          missing
+                            ? "Not detected — enter value"
+                            : ""
                         }
                         rows={Input === "textarea" ? 5 : undefined}
                         onFocus={() => onSelect(field)}
@@ -106,6 +163,16 @@ export default function FieldTable({
                             ? "border-amber-300 bg-amber-50/50 placeholder:text-amber-800/70"
                             : "border-transparent bg-transparent hover:border-slate-200"
                         } ${Input === "input" ? "h-9" : ""}`}
+                      />
+
+                      <span
+                        role="img"
+                        aria-label={confidenceLabel}
+                        title={confidenceLabel}
+                        className="mt-2.5 ml-1 inline-block h-[22px] w-[22px] shrink-0 rounded-full border-2 border-white shadow-sm"
+                        style={{
+                          backgroundColor: confidenceColor,
+                        }}
                       />
 
                       {status === "saving" && (
