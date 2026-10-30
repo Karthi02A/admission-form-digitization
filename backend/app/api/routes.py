@@ -174,6 +174,7 @@ async def upload(batch_id: str, files: Annotated[list[UploadFile], File(...)], e
                 "extraction_method": None,
                 "extracted_text": "",
                 "fields": fields,
+                "field_confidence": {},
                 "quality": quality,
             }
             b["documents"].append(d)
@@ -216,10 +217,11 @@ def process_batch_extraction(batch_id: str) -> None:
         try:
             if path.parent != FILES.resolve() or not path.is_file():
                 raise FileNotFoundError("Original file not found")
-            fields, quality, metrics = extract_document_with_ai(path)
+            fields, field_confidence, quality, metrics = extract_document_with_ai(path)
             metrics["request_total_ms"] = round((perf_counter() - started) * 1000)
             document_data.update({
                 "fields": fields,
+                "field_confidence": field_confidence,
                 "quality": quality,
                 "extraction_method": f"{metrics.get('provider', 'ai')}_vision_api",
                 "extraction_metrics": metrics,
@@ -269,9 +271,9 @@ def extract_document(batch_id: str, doc_id: str):
         return public_document(document_data)
     started = perf_counter()
     try:
-        fields, quality, metrics = extract_document_with_ai(path)
+        fields, field_confidence, quality, metrics = extract_document_with_ai(path)
         metrics["request_total_ms"] = round((perf_counter() - started) * 1000)
-        document_data.update({"fields": fields, "quality": quality, "extraction_method": f"{metrics.get('provider', 'ai')}_vision_api", "extraction_metrics": metrics, "status": "review_required" if quality["review_required"] else "extracted", "error": None, "updated_at": now()})
+        document_data.update({"fields": fields, "field_confidence": field_confidence, "quality": quality, "extraction_method": f"{metrics.get('provider', 'ai')}_vision_api", "extraction_metrics": metrics, "status": "review_required" if quality["review_required"] else "extracted", "error": None, "updated_at": now()})
     except Exception as error:
         logger.exception("AI extraction failed: batch_id=%s document_id=%s", batch_id, doc_id)
         document_data.update({"status": "failed", "error": str(error), "updated_at": now()})
