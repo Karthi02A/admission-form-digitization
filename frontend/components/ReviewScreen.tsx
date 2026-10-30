@@ -64,7 +64,7 @@ export default function ReviewScreen({ batchId, documents, selectedId, saveState
           <div className="flex min-h-11 items-center justify-between border-b border-line px-4 py-2"><h2 className="text-sm font-semibold">Extracted data</h2>{document.error && <span className="text-xs font-medium text-red-700">Extraction failed</span>}</div>
           {document.error && <p role="alert" className="border-b border-red-100 bg-red-50 px-4 py-2 text-xs text-red-800">{document.error}</p>}
           {notice && <p role="status" className="border-b border-amber-100 bg-amber-50 px-4 py-2 text-xs text-amber-900">{notice}</p>}
-          <FieldTable fields={document.fields} selectedField={selectedField} saveStates={saveStatus} onSelect={setSelectedField} onChange={(field, value) => onChangeField(document.document_id, field, value)} onRetry={field => onRetryField(document.document_id, field)} />
+          <FieldTable fields={document.fields} fieldConfidence={document.field_confidence} selectedField={selectedField} saveStates={saveStatus} onSelect={setSelectedField} onChange={(field, value) => onChangeField(document.document_id, field, value)} onRetry={field => onRetryField(document.document_id, field)} />
         </section>
       </div>
     </main>
