@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ReviewScreen from "@/components/ReviewScreen";
 import UploadScreen from "@/components/UploadScreen";
 import { apiUrl, request } from "@/lib/api";
@@ -46,6 +46,15 @@ function responseDocument(document: StudentDocument, error?: string): StudentDoc
 }
 
 export default function AdmissionWorkspace() {
+  const [theme, setTheme] = useState<"dark" | "light">("light");
+  useEffect(() => {
+    const saved = window.localStorage.getItem("admission-ui-theme");
+    if (saved === "light" || saved === "dark") setTheme(saved);
+  }, []);
+  useEffect(() => {
+    window.localStorage.setItem("admission-ui-theme", theme);
+  }, [theme]);
+
   const [files, setFiles] = useState<UploadEntry[]>([]);
   const [documents, setDocuments] = useState<StudentDocument[]>([]);
   const [batchId, setBatchId] = useState<string | null>(null);
@@ -413,15 +422,34 @@ export default function AdmissionWorkspace() {
   }, [batchId, documents.length, flushAll]);
 
   return (
-    <div className="min-h-screen">
-      <header className="sticky top-0 z-20 flex min-h-[70px] flex-wrap items-center justify-between gap-3 border-b border-line bg-white px-4 py-3 shadow-sm md:px-7">
+    <div className={`app-shell min-h-screen ${theme === "dark" ? "theme-dark" : "theme-light"} ${screen === "upload" ? "screen-upload" : "screen-review"}`}>
+      <header className="app-header sticky top-0 z-20 flex min-h-[70px] flex-wrap items-center justify-between gap-3 border-b border-line bg-white px-4 py-3 shadow-sm md:px-7">
         <div className="flex items-center gap-3">
-          <div aria-hidden="true" className="grid h-10 w-10 place-items-center rounded-xl bg-brand text-sm font-extrabold text-white">AD</div>
+          <div aria-hidden="true" className="app-logo grid h-10 w-10 place-items-center rounded-xl bg-brand text-sm font-extrabold text-white">AD</div>
           <div>
-            <h1 className="text-base font-bold tracking-tight">Admission Form Digitization</h1>
-            <p className="mt-0.5 text-xs text-muted">Upload, extract, and review admission records.</p>
+            <h1 className="app-title text-base font-bold tracking-tight">Admission Form Digitization</h1>
+            <p className="app-subtitle mt-0.5 text-xs text-muted">Upload, extract, and review admission records.</p>
           </div>
         </div>
+        <div className="flex items-center gap-2">
+          {screen === "upload" && (
+            <button
+              type="button"
+              role="switch"
+              aria-checked={theme === "dark"}
+              aria-label={`Switch to ${theme === "dark" ? "light" : "dark"} mode`}
+              title={`Switch to ${theme === "dark" ? "light" : "dark"} mode`}
+              onClick={() => setTheme(value => value === "dark" ? "light" : "dark")}
+              className={`theme-toggle ${theme === "dark" ? "is-dark" : "is-light"}`}
+            >
+              <span className={`theme-toggle-option sun-option ${theme === "light" ? "is-active" : ""}`} aria-hidden="true">
+                <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M4.93 4.93l1.42 1.42m11.3 11.3 1.42 1.42M2 12h2m16 0h2M4.93 19.07l1.42-1.42m11.3-11.3 1.42-1.42"/></svg>
+              </span>
+              <span className={`theme-toggle-option moon-option ${theme === "dark" ? "is-active" : ""}`} aria-hidden="true">
+                <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M20.8 15.4A8.5 8.5 0 0 1 8.6 3.2 8.5 8.5 0 1 0 20.8 15.4Z"/></svg>
+              </span>
+            </button>
+          )}
         {screen === "review" && currentDocument && (
           <div className="flex flex-wrap items-center justify-end gap-2">
             <button type="button" onClick={() => void backToUpload()} disabled={batchBusy} className="rounded-lg border border-line px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">Back to upload</button>
@@ -429,6 +457,7 @@ export default function AdmissionWorkspace() {
             <button type="button" onClick={() => void startNewBatch()} disabled={batchBusy} className="rounded-lg border border-red-200 px-3 py-2 text-sm font-semibold text-red-700 hover:bg-red-50 disabled:opacity-50">{batchBusy ? "Starting…" : "New Batch"}</button>
           </div>
         )}
+        </div>
       </header>
 
       {screen === "upload" ? (
@@ -445,13 +474,13 @@ export default function AdmissionWorkspace() {
             onProcess={() => void startProcessing()}
           />
           {documents.length > 0 && !processing && (
-            <div className="mx-auto flex max-w-[1500px] justify-end px-5 pb-7 lg:px-8">
-              <button type="button" onClick={openReview} className="rounded-lg bg-brand px-5 py-2.5 text-sm font-semibold text-white hover:bg-blue-800">Review</button>
+            <div className="app-actions mx-auto flex max-w-[1500px] justify-end px-5 pb-7 lg:px-8">
+              <button type="button" onClick={openReview} className="action-primary rounded-lg bg-brand px-5 py-2.5 text-sm font-semibold text-white hover:bg-blue-800">Review</button>
             </div>
           )}
           {batchId && !processing && (
-            <div className="mx-auto flex max-w-[1500px] justify-end px-5 pb-7 lg:px-8">
-              <button type="button" onClick={() => void startNewBatch()} disabled={batchBusy} className="rounded-lg border border-red-200 px-4 py-2 text-sm font-semibold text-red-700 hover:bg-red-50 disabled:opacity-50">Discard batch and start over</button>
+            <div className="app-actions mx-auto flex max-w-[1500px] justify-end px-5 pb-7 lg:px-8">
+              <button type="button" onClick={() => void startNewBatch()} disabled={batchBusy} className="action-danger rounded-lg border border-red-200 px-4 py-2 text-sm font-semibold text-red-700 hover:bg-red-50 disabled:opacity-50">Discard batch and start over</button>
             </div>
           )}
         </>
