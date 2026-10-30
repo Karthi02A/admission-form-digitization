@@ -5,6 +5,7 @@ export type StudentDocument = {
   status: string;
   error?: string | null;
   fields: Record<string, string>;
+  field_confidence?: Record<string, number>;
 };
 
 export type UploadEntry = {
