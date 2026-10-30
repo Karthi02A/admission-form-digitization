@@ -406,7 +406,7 @@ def _fused_inline_value(line, aliases):
     """Read a value attached to a label only if validation accepts it."""
     fused_fields = {
         "Received By", "Student Name", "Father's Name", "Mother's Name",
-        "Nationality", "Religion", "Bank Name", "Gender", "Community",
+        "Nationality", "Religion", "Bank Name", "Gender", "Community", "Caste",
         "Physically Challenged", "First Graduate", "Transfer Certificate",
         "Mark Sheets", "Community Certificate", "Income Certificate",
         "Father Mobile No", "Telephone No", "Mobile Number", "Pincode",
@@ -693,7 +693,10 @@ def _vision_prompt() -> str:
     checkbox_fields = sorted(set(CHECKBOX_FIELDS) | {"Course Applied"})
     return f"""You extract data from the supplied college admission application. Read the ORIGINAL attached PDF/image directly. Inspect every page and map only visible answers to the fixed schema. Do not rely on an OCR transcript. The field schema describes the expected form; it is not evidence that a field has a value.
 
-Return exactly one JSON object: {{"fields":{{...}}}}. Include every canonical key below, no other keys, and make every value a string.
+Return exactly one JSON object with this shape:
+{{"fields":{{...}},"confidence":{{...}}}}.
+The "fields" object must include every canonical key below, no other keys, and every field value must be a string.
+The "confidence" object must include every canonical key below, with an integer from 0 to 100 for each field.
 For ordinary fields, use "-" only when the corresponding area on the original form is visibly blank or the information is clearly not provided. Use "" when the information appears to be present but is unreadable, ambiguous, or cannot be mapped. For selectable fields ({compact(checkbox_fields)}), use "-" only when the form clearly shows no option selected or the status is clearly not provided; use "" when a mark is present but its meaning is ambiguous or unreadable. Never convert uncertainty into "Yes" or "No".
 
 CANONICAL FIELDS: {compact(schema)}
@@ -705,8 +708,8 @@ RULES:
 - First inspect the page layout visually, then read each handwritten answer from the box or line belonging to its printed label. Follow the label-to-value relationship, not text proximity alone. Keep student, parent, guardian, contact, address, and academic fields separate.
 - Copy visible handwriting faithfully. Preserve identifiers and numbers as strings, including leading zeroes. Do not silently correct handwriting, spelling, dates, or identifiers. If the field area is visibly empty, return "-". If handwriting or a mark is present but cannot be read or mapped reliably, return "" so the UI marks it for review. Do not guess uncertain characters.
 - For every checkbox/radio group, inspect the individual printed boxes and the mark inside each box. Do not infer a selection from nearby handwriting, a field label, or a mark belonging to another row. Return the value associated with the visibly ticked/crossed box only. If no box is marked, use "-"; if the mark or the selected option is ambiguous, use "". Gender, Community, Physically Challenged, First Graduate, and Course Applied must each be read from their own group. Never assume that a printed option is selected just because it appears in the form.
-- For Course Applied, inspect every course option box in section (a), including the left, middle, and right columns. Record every clearly ticked course and no unticked course. Map each tick to the exact nearest printed course label in that same row. Return the exact allowed course name(s), joined with "; ". Do not return a guess based on the student's name, photo, course popularity, or another form. Use "-" only if no course is marked. If a course tick is visible but cannot be mapped to a label, return "" for review. If a tick is visible but its label is not confidently identifiable, return the closest visible label text rather than silently omitting it, so the result can be reviewed.
-- Keep "Community" and "Sub Caste" distinct: "Community" is the selected printed category (OC, BC, MBC, DNC, BC(M), BC(C), SC, ST, or another visibly printed option); "Sub Caste" is the separately handwritten subgroup text. Never put the handwritten sub-caste name in "Community". If the selected category cannot be read, use "".
+- For Course Applied, inspect every course option box in section (a), including the left, middle, and right columns, one box at a time. Count the marked boxes before deciding the result. Record every clearly ticked course and no unticked course. Map each tick to the exact nearest printed course label in that same row. Return the exact allowed course name(s), joined with "; ". Do not return a guess based on the student's name, photo, course popularity, or another form. Use "-" only after checking that every course box is unmarked. If one or more marks are visible but the selected course cannot be mapped confidently, return "" for review; never return "-" when a mark is visible. If more than one course box is marked, return all marked course names joined with "; " so the result can be flagged for review rather than silently selecting one.
+- Keep "Community", "Caste", and "Sub Caste" as three distinct fields. "Community" is the selected printed category (OC, BC, MBC, DNC, BC(M), BC(C), SC, ST, or another visibly printed option). "Caste" is the value written beside the separate printed Caste label. "Sub Caste" is the value written beside the separate Sub Caste label. Never copy one field into another. If a field cannot be read reliably, use "".
 - For academic records, read page 2's table by both row and column. Put the complete visible XI-side academic details in "XI Academic Records" and the complete visible XII-side academic details in "XII Academic Records"; preserve subject names and each subject's marks in the appropriate side. Populate the separate XI/XII register-number, marks-obtained, total-marks, maximum-marks, and percentage fields only when those values are visibly present and can be assigned to the correct standard. Never swap XI and XII columns, combine both standards into one field, or infer blank register numbers, totals, or percentages.
 - For Transfer Certificate, Mark Sheets, Community Certificate, Income Certificate, Passport-size Photo (4), Aadhaar (Proof), PAN (Proof), and Bank Passbook (Proof), inspect only the corresponding row in the Certificate Details area. The printed list alone is not evidence that a certificate was received. Return "Yes" only when that row contains an unambiguous receipt mark or explicit receipt text. Return "-" only when the row clearly indicates not received/not enclosed or there is clearly no receipt mark in the row; return "" when a mark exists but its status cannot be determined. Do not infer status from unrelated marks, the Remarks column, or office-use marks, and do not assign one row's status to another certificate.
 - Do not create extra fields, including an "Enclosed Certificate" field.
@@ -715,7 +718,14 @@ RULES:
 - For Blood Group, return only one of A+, A-, B+, B-, AB+, AB-, O+, O-. If the handwriting is not clearly one of these, return "" rather than guessing or converting a variant such as A1+.
 - Extract actual entries in office-use sections when present; do not copy printed examples, instructions, or labels as answers.
 - Do not calculate missing totals, percentages, ages, or dates. Do not describe signatures; return "" for signature fields unless the schema explicitly requires visible text.
-- Return JSON only. No markdown, commentary, confidence score, page number, or extra metadata.
+- Confidence scoring is a separate assessment from extraction. For EVERY canonical field, compare the value you returned with the corresponding area in the ORIGINAL document before assigning the score.
+- Use this score rubric consistently: 95-100 only when the exact value OR the fact that the field is blank/unselected is clearly visible and correctly represented; 85-94 when the field's status/value is somewhat ambiguous or handwriting is difficult but your result is plausible; 0-84 when a visible value/selection was missed, the returned value conflicts with the document, or you cannot reliably determine what the source says.
+- A clearly blank field correctly returned as "-" can have high confidence. Do not lower confidence merely because the value is "-".
+- Conversely, never give high confidence merely because a field is blank, contains "-", or has a syntactically valid value. If the document contains a value but you returned "-" or "", confidence must be below 85.
+- For Course Applied, Blood Group, Received By, Received Date, and all other fields, specifically check whether the original form area contains a visible answer before deciding that "-" or "" is correct. Do not assume those fields are blank.
+- A populated value is not automatically high confidence. Judge whether that exact value is supported by the source, not whether it looks plausible.
+- Use confidence values honestly. Do not assign a high score just to complete the schema; if evidence is unclear, lower the score.
+- Return JSON only. No markdown, commentary, page number, or extra metadata beyond "fields" and "confidence".
 """
 
 
@@ -909,7 +919,7 @@ def _parse_gemini_response(data: dict[str, _Any]) -> dict[str, str]:
     return fields
 
 
-def _parse_openrouter_response(data: dict[str, _Any]) -> dict[str, str]:
+def _parse_openrouter_response(data: dict[str, _Any]) -> tuple[dict[str, str], dict[str, int]]:
     """Parse OpenAI-compatible chat-completions response into the common fields schema."""
     try:
         content = data["choices"][0]["message"]["content"]
@@ -934,10 +944,14 @@ def _parse_openrouter_response(data: dict[str, _Any]) -> dict[str, str]:
     if not isinstance(result, dict) or not isinstance(result.get("fields"), dict):
         raise ValueError("AI provider response must contain a 'fields' object.")
     incoming = result["fields"]
+    incoming_confidence = result.get("confidence", {})
+    if not isinstance(incoming_confidence, dict):
+        incoming_confidence = {}
     unknown = sorted(set(incoming) - set(ALIASES))
     if unknown:
         raise ValueError("AI provider returned unknown field names; response rejected.")
     fields: dict[str, str] = {}
+    original_values: dict[str, str] = {}
     for key in ALIASES:
         value = incoming.get(key, "")
         if value is None:
@@ -945,10 +959,54 @@ def _parse_openrouter_response(data: dict[str, _Any]) -> dict[str, str]:
         if not isinstance(value, str):
             raise ValueError(f"AI provider returned a non-string value for '{key}'; response rejected.")
         value = value.strip()
+        # Keep the model's raw answer so confidence can detect when local
+        # normalization rejects a non-empty value.
+        original_values[key] = value
         # Preserve blank as uncertainty; "-" means visibly unselected only.
         fields[key] = value
     fields["Course Applied"] = _normalize_course_selection(fields.get("Course Applied", ""))
-    return _normalize_fields(fields)
+    normalized_fields = _normalize_fields(fields)
+
+    # Keep confidence separate from editable field values. Missing or invalid
+    # scores fall back to 50 (orange), never an invented high-confidence score.
+    confidence: dict[str, int] = {}
+    for key in ALIASES:
+        raw_score = incoming_confidence.get(key, 50)
+        try:
+            score = int(float(raw_score))
+        except (TypeError, ValueError, OverflowError):
+            score = 50
+        score = max(0, min(100, score))
+
+        # If the model returned a non-empty answer but local normalization
+        # discarded it, the final saved value no longer represents that answer.
+        # Cap this case at red rather than showing a misleading green dot.
+        raw_value = original_values.get(key, "").strip()
+        normalized_value = normalized_fields.get(key, "").strip()
+        if raw_value not in {"", "-"} and not normalized_value:
+            score = min(score, 84)
+
+        # Multiple course selections require manual review; do not show green.
+        if key == "Course Applied" and normalized_value and normalized_value != "-":
+            selected_courses = [
+                item.strip()
+                for item in normalized_value.split(";")
+                if item.strip()
+            ]
+            if len(selected_courses) > 1:
+                score = min(score, 84)
+
+        confidence[key] = score
+
+    # Admission Date is in the office-use section. When both Admission No
+    # and Admission Date are explicitly blank, keep their confidence treatment
+    # consistent instead of allowing the blank date to be arbitrarily red.
+    if (
+        normalized_fields.get("Admission No", "").strip() == "-"
+        and normalized_fields.get("Admission Date", "").strip() == "-"
+    ):
+        confidence["Admission Date"] = confidence.get("Admission No", 50)
+    return normalized_fields, confidence
 
 
 def _openai_compatible_image_parts(file_path: str | _Path) -> tuple[list[dict[str, _Any]], int]:
@@ -987,7 +1045,7 @@ def _openai_compatible_image_parts(file_path: str | _Path) -> tuple[list[dict[st
     return parts, page_count
 
 
-def extract_document_with_ai(file_path: str | _Path) -> tuple[dict[str, str], dict[str, _Any], dict[str, _Any]]:
+def extract_document_with_ai(file_path: str | _Path) -> tuple[dict[str, str], dict[str, int], dict[str, _Any], dict[str, _Any]]:
     """Run the shared extraction prompt through the provider selected in .env."""
     from app.services.ai_provider import request_document
 
@@ -1002,7 +1060,7 @@ def extract_document_with_ai(file_path: str | _Path) -> tuple[dict[str, str], di
 
     started = _time.perf_counter()
     result = request_document(settings, file_path, _vision_prompt(), _MAX_PAGES)
-    fields = _parse_openrouter_response({"choices": [{"message": {"content": result["content"]}}]})
+    fields, field_confidence = _parse_openrouter_response({"choices": [{"message": {"content": result["content"]}}]})
     certificate_fields = {"Transfer Certificate", "Mark Sheets", "Community Certificate", "Income Certificate", "Passport-size Photo", "Aadhaar Proof", "PAN Proof", "Bank Passbook Proof"}
     missing = [key for key, value in fields.items() if not value or (value == "-" and key not in certificate_fields)]
     quality = {"total_fields": len(fields), "filled_fields": len(fields) - len(missing), "missing_fields": missing, "review_required": bool(missing)}
@@ -1015,4 +1073,4 @@ def extract_document_with_ai(file_path: str | _Path) -> tuple[dict[str, str], di
         "input_tokens": usage.get("input_tokens"),
         "output_tokens": usage.get("output_tokens"),
     }
-    return fields, quality, metrics
+    return fields, field_confidence, quality, metrics
