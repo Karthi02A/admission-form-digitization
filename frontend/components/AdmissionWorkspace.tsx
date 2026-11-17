@@ -51,6 +51,7 @@ export default function AdmissionWorkspace() {
   const [batchId, setBatchId] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState("");
   const [screen, setScreen] = useState<"upload" | "review">("upload");
+  const [theme, setTheme] = useState<"light" | "dark">("light");
   const [processing, setProcessing] = useState(false);
   const [progress, setProgress] = useState("");
   const [notice, setNotice] = useState("");
