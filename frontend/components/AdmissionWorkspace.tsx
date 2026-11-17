@@ -46,12 +46,20 @@ function responseDocument(document: StudentDocument, error?: string): StudentDoc
 }
 
 export default function AdmissionWorkspace() {
+  const [theme, setTheme] = useState<"dark" | "light">("dark");
+  useEffect(() => {
+    const saved = window.localStorage.getItem("admission-ui-theme");
+    if (saved === "light" || saved === "dark") setTheme(saved);
+  }, []);
+  useEffect(() => {
+    window.localStorage.setItem("admission-ui-theme", theme);
+  }, [theme]);
+
   const [files, setFiles] = useState<UploadEntry[]>([]);
   const [documents, setDocuments] = useState<StudentDocument[]>([]);
   const [batchId, setBatchId] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState("");
   const [screen, setScreen] = useState<"upload" | "review">("upload");
-  const [theme, setTheme] = useState<"light" | "dark">("light");
   const [processing, setProcessing] = useState(false);
   const [progress, setProgress] = useState("");
   const [notice, setNotice] = useState("");
