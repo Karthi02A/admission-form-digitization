@@ -46,15 +46,6 @@ function responseDocument(document: StudentDocument, error?: string): StudentDoc
 }
 
 export default function AdmissionWorkspace() {
-  const [theme, setTheme] = useState<"dark" | "light">("light");
-  useEffect(() => {
-    const saved = window.localStorage.getItem("admission-ui-theme");
-    if (saved === "light" || saved === "dark") setTheme(saved);
-  }, []);
-  useEffect(() => {
-    window.localStorage.setItem("admission-ui-theme", theme);
-  }, [theme]);
-
   const [files, setFiles] = useState<UploadEntry[]>([]);
   const [documents, setDocuments] = useState<StudentDocument[]>([]);
   const [batchId, setBatchId] = useState<string | null>(null);
@@ -73,6 +64,43 @@ export default function AdmissionWorkspace() {
   const pendingSaves = useRef(new Map<string, SavePayload>());
   const timers = useRef(new Map<string, ReturnType<typeof setTimeout>>());
   const inFlight = useRef(new Map<string, Promise<boolean>>());
+
+  // Reveal the four landing-page benefit cards as they enter the viewport.
+  // This effect is limited to the upload screen; review components are untouched.
+  useEffect(() => {
+    if (screen !== "upload") return;
+
+    const cards = Array.from(
+      document.querySelectorAll<HTMLElement>(".screen-upload .landing-benefit"),
+    );
+    if (!cards.length) return;
+
+    const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    if (reduceMotion || !("IntersectionObserver" in window)) {
+      cards.forEach(card => card.classList.add("is-visible"));
+      return;
+    }
+
+    cards.forEach((card, index) => {
+      card.classList.add("reveal-ready");
+      card.style.transitionDelay = `${index * 100}ms`;
+    });
+
+    const observer = new IntersectionObserver(
+      entries => {
+        entries.forEach(entry => {
+          if (entry.isIntersecting) {
+            entry.target.classList.add("is-visible");
+            observer.unobserve(entry.target);
+          }
+        });
+      },
+      { threshold: 0.16, rootMargin: "0px 0px -35px 0px" },
+    );
+
+    cards.forEach(card => observer.observe(card));
+    return () => observer.disconnect();
+  }, [screen]);
 
   const currentDocument = useMemo(
     () => documents.find(document => document.document_id === selectedId) || documents[0],
@@ -483,6 +511,55 @@ export default function AdmissionWorkspace() {
               <button type="button" onClick={() => void startNewBatch()} disabled={batchBusy} className="action-danger rounded-lg border border-red-200 px-4 py-2 text-sm font-semibold text-red-700 hover:bg-red-50 disabled:opacity-50">Discard batch and start over</button>
             </div>
           )}
+          <section className="landing-benefits" aria-labelledby="landing-benefits-title">
+            <div className="landing-benefits-inner">
+              <div className="landing-benefits-heading">
+                <h2 id="landing-benefits-title">Why Choose Our Admission Processing System?</h2>
+              </div>
+
+              <div className="landing-benefits-list">
+                <article className="landing-benefit">
+                  <span className="landing-benefit-icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="8.5"/><path d="M12 7v5l3.2 2"/></svg>
+                  </span>
+                  <div className="landing-benefit-copy"><h3>Time Efficiency</h3><p>Reduce repetitive manual data entry and complete admission processing faster.</p></div>
+                </article>
+
+                <article className="landing-benefit">
+                  <span className="landing-benefit-icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5.5"/><circle cx="12" cy="12" r="2"/></svg>
+                  </span>
+                  <div className="landing-benefit-copy"><h3>More Than 90% Accuracy</h3><p>AI-assisted information extraction with manual review and correction.</p></div>
+                </article>
+
+                <article className="landing-benefit">
+                  <span className="landing-benefit-icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" fill="none"><rect x="7" y="7" width="13" height="13" rx="2"/><path d="M16 7V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h2"/></svg>
+                  </span>
+                  <div className="landing-benefit-copy"><h3>Bulk Document Processing</h3><p>Upload and process up to 20 student admission documents in one batch.</p></div>
+                </article>
+
+                <article className="landing-benefit">
+                  <span className="landing-benefit-icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" fill="none"><rect x="3.5" y="4" width="17" height="16" rx="2"/><path d="M3.5 10h17M9 4v16"/></svg>
+                  </span>
+                  <div className="landing-benefit-copy"><h3>Easy Data Export</h3><p>Export reviewed student records into structured Excel and CSV formats.</p></div>
+                </article>
+              </div>
+            </div>
+          </section>
+
+          <footer className="landing-footer">
+            <p>Developed by <strong>Aurelion Future Forge Pvt. Ltd.</strong></p>
+            <a
+              className="landing-footer-link"
+              href="https://www.aurelionfutureforge.com/"
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              www.aurelionfutureforge.com
+            </a>
+          </footer>
         </>
       ) : (
         <ReviewScreen
