@@ -1,19 +1,40 @@
 
+from contextlib import asynccontextmanager
+from collections.abc import AsyncIterator
+import os
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.utils import get_openapi
-import os
 from fastapi.responses import RedirectResponse
 
 from app.config.settings import ORIGINS
 from app.api.routes import router
+from app.analytics.database import initialize_database
+from app.analytics.router import router as analytics_router
 
-FRONTEND_URL = os.getenv("FRONTEND_URL", "http://127.0.0.1:3000").rstrip("/")
+
+FRONTEND_URL = os.getenv(
+    "FRONTEND_URL",
+    "http://127.0.0.1:3000"
+).rstrip("/")
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    # Initialize PostgreSQL analytics tables during application startup.
+    # Analytics remains separate from the existing admission workflow.
+    initialize_database()
+
+    yield
+
 
 app = FastAPI(
     title="Admission Form Digitization API",
     version="1.0.0",
+    lifespan=lifespan,
 )
+
 
 app.add_middleware(
     CORSMiddleware,
@@ -23,7 +44,12 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
+# Existing admission API routes
 app.include_router(router)
+
+# Anonymous visitor analytics routes
+app.include_router(analytics_router)
 
 
 def custom_openapi():

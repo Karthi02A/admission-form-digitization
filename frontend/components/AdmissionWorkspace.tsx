@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ReviewScreen from "@/components/ReviewScreen";
 import UploadScreen from "@/components/UploadScreen";
 import { apiUrl, request } from "@/lib/api";
+import { startUsageTracking } from "@/lib/analytics";
 import type { SaveState, StudentDocument, UploadEntry } from "@/lib/types";
 
 type BatchResponse = { batch_id: string };
@@ -54,6 +55,10 @@ export default function AdmissionWorkspace() {
   useEffect(() => {
     window.localStorage.setItem("admission-ui-theme", theme);
   }, [theme]);
+
+  // Anonymous usage analytics runs independently of the admission workflow.
+  // Tracking failures are intentionally ignored by the analytics client.
+  useEffect(() => startUsageTracking(), []);
 
   const [files, setFiles] = useState<UploadEntry[]>([]);
   const [documents, setDocuments] = useState<StudentDocument[]>([]);
