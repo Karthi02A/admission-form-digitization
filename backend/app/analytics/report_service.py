@@ -254,12 +254,12 @@ def email_pdf_report(pdf_bytes: bytes, metrics: dict) -> None:
 
     request = urllib.request.Request(
         url="https://api.resend.com/emails",
-        data=json.dumps(payload).encode("utf-8"),
         headers={
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json",
-        },
-        method="POST",
+            "Accept": "application/json",
+            "User-Agent": "Annai-Admission-Analytics/1.0",
+  },
     )
 
     try:
