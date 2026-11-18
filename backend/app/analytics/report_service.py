@@ -1,12 +1,15 @@
+
 """Build and email the weekly anonymous-usage analytics report."""
 from __future__ import annotations
 
 import os
 import secrets
-import smtplib
+import base64
+import json
+import urllib.error
+import urllib.request
 from collections import defaultdict
 from datetime import date, datetime, time, timedelta, timezone
-from email.message import EmailMessage
 from io import BytesIO
 from zoneinfo import ZoneInfo
 
@@ -76,12 +79,14 @@ def collect_weekly_metrics(db: Session, now: datetime | None = None) -> dict:
         sessions = len(rows)
         active_seconds = sum(int(row.active_seconds or 0) for row in rows)
         daily: dict[str, set[str]] = defaultdict(set)
+
         for row in rows:
             started = row.started_at
             if started.tzinfo is None:
                 started = started.replace(tzinfo=timezone.utc)
             day_key = started.astimezone(REPORT_TZ).date().isoformat()
             daily[day_key].add(row.visitor_id)
+
         return {
             "unique_visitors": len(visitors),
             "total_sessions": sessions,
@@ -94,8 +99,12 @@ def collect_weekly_metrics(db: Session, now: datetime | None = None) -> dict:
     previous = summarize(previous_rows)
     day_count = (end_local.date() - start_local.date()).days + 1
     days = [start_local.date() + timedelta(days=i) for i in range(max(day_count, 1))]
+
     daily_rows = [
-        {"date": day.isoformat(), "visitors": len(current["daily_visitors"].get(day.isoformat(), set()))}
+        {
+            "date": day.isoformat(),
+            "visitors": len(current["daily_visitors"].get(day.isoformat(), set()))
+        }
         for day in days
     ]
 
@@ -123,6 +132,7 @@ def generate_pdf(metrics: dict) -> bytes:
         title="Weekly Admission Website Usage Report",
         author="Admission Analytics System",
     )
+
     styles = getSampleStyleSheet()
     styles.add(ParagraphStyle(
         name="ReportTitle", parent=styles["Title"], fontSize=19,
@@ -133,6 +143,7 @@ def generate_pdf(metrics: dict) -> bytes:
         name="SmallMuted", parent=styles["Normal"], fontSize=8,
         textColor=colors.HexColor("#666666"), leading=11,
     ))
+
     story = [
         Paragraph("Weekly Admission Website Usage Report", styles["ReportTitle"]),
         Paragraph(f"Reporting period: {metrics['period_label']}", styles["Normal"]),
@@ -141,6 +152,7 @@ def generate_pdf(metrics: dict) -> bytes:
 
     current = metrics["current"]
     previous = metrics["previous"]
+
     summary_data = [
         ["Metric", "This period", "Previous period", "Change"],
         ["Unique visitors", str(current["unique_visitors"]), str(previous["unique_visitors"]), metrics["changes"]["unique_visitors"]],
@@ -148,6 +160,7 @@ def generate_pdf(metrics: dict) -> bytes:
         ["Total active time", _duration(current["total_active_seconds"]), _duration(previous["total_active_seconds"]), metrics["changes"]["total_active_seconds"]],
         ["Average active time per visit", _duration(current["average_active_seconds"]), _duration(previous["average_active_seconds"]), "—"],
     ]
+
     table = Table(summary_data, colWidths=[61 * mm, 34 * mm, 34 * mm, 30 * mm], repeatRows=1)
     table.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#5F9EA0")),
@@ -160,10 +173,19 @@ def generate_pdf(metrics: dict) -> bytes:
         ("TOPPADDING", (0, 0), (-1, -1), 8),
         ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
     ]))
-    story += [Paragraph("Weekly summary", styles["Heading2"]), table, Spacer(1, 7 * mm)]
+
+    story += [
+        Paragraph("Weekly summary", styles["Heading2"]),
+        table,
+        Spacer(1, 7 * mm)
+    ]
 
     daily_data = [["Date (India time)", "Unique visitors"]]
-    daily_data.extend([[item["date"], str(item["visitors"])] for item in metrics["daily_visitors"]])
+    daily_data.extend([
+        [item["date"], str(item["visitors"])]
+        for item in metrics["daily_visitors"]
+    ])
+
     daily_table = Table(daily_data, colWidths=[95 * mm, 45 * mm], repeatRows=1)
     daily_table.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#5F9EA0")),
@@ -175,29 +197,40 @@ def generate_pdf(metrics: dict) -> bytes:
         ("TOPPADDING", (0, 0), (-1, -1), 6),
         ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
     ]))
-    story += [Paragraph("Daily visitor trend", styles["Heading2"]), daily_table, Spacer(1, 6 * mm)]
+
+    story += [
+        Paragraph("Daily visitor trend", styles["Heading2"]),
+        daily_table,
+        Spacer(1, 6 * mm)
+    ]
+
     story.append(Paragraph(
         "Notes: Visitors are counted using distinct anonymous browser IDs with a session started during the reporting period. "
         "Active time is the sum of recorded visible-tab activity for sessions started during that period. "
-        "This report contains aggregate usage metrics only.", styles["SmallMuted"]
+        "This report contains aggregate usage metrics only.",
+        styles["SmallMuted"]
     ))
+
     doc.build(story)
     return buffer.getvalue()
 
 
 def email_pdf_report(pdf_bytes: bytes, metrics: dict) -> None:
-    sender = os.getenv("SMTP_EMAIL", "").strip()
-    app_password = os.getenv("SMTP_APP_PASSWORD", "").strip().replace(" ", "")
+    api_key = os.getenv("RESEND_API_KEY", "").strip()
+    sender = os.getenv("REPORT_FROM_EMAIL", "").strip()
     recipient = os.getenv("REPORT_RECIPIENT_EMAIL", "").strip()
-    if not sender or not app_password or not recipient:
-        raise RuntimeError("SMTP_EMAIL, SMTP_APP_PASSWORD and REPORT_RECIPIENT_EMAIL must be configured")
 
-    message = EmailMessage()
-    message["Subject"] = f"Weekly Admission Website Usage Report – {datetime.now(REPORT_TZ):%d %b %Y}"
-    message["From"] = sender
-    message["To"] = recipient
-    message.set_content(
-        "Hello,\n\nPlease find attached the weekly Admission website usage report.\n\n"
+    if not api_key or not sender or not recipient:
+        raise RuntimeError(
+            "RESEND_API_KEY, REPORT_FROM_EMAIL and REPORT_RECIPIENT_EMAIL must be configured"
+        )
+
+    report_date = datetime.now(REPORT_TZ).strftime("%Y-%m-%d")
+    filename = f"admission-usage-report-{report_date}.pdf"
+
+    message_text = (
+        "Hello,\n\n"
+        "Please find attached the weekly Admission website usage report.\n\n"
         f"Reporting period: {metrics['period_label']}\n"
         f"Unique visitors: {metrics['current']['unique_visitors']}\n"
         f"Total visits: {metrics['current']['total_sessions']}\n"
@@ -205,22 +238,52 @@ def email_pdf_report(pdf_bytes: bytes, metrics: dict) -> None:
         f"Average active time per visit: {_duration(metrics['current']['average_active_seconds'])}\n\n"
         "Regards,\nAdmission Analytics System"
     )
-    message.add_attachment(
-        pdf_bytes, maintype="application", subtype="pdf",
-        filename=f"admission-usage-report-{datetime.now(REPORT_TZ):%Y-%m-%d}.pdf",
+
+    payload = {
+        "from": sender,
+        "to": [recipient],
+        "subject": f"Weekly Admission Website Usage Report – {datetime.now(REPORT_TZ):%d %b %Y}",
+        "text": message_text,
+        "attachments": [
+            {
+                "filename": filename,
+                "content": base64.b64encode(pdf_bytes).decode("ascii"),
+            }
+        ],
+    }
+
+    request = urllib.request.Request(
+        url="https://api.resend.com/emails",
+        data=json.dumps(payload).encode("utf-8"),
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        },
+        method="POST",
     )
-    with smtplib.SMTP("smtp.gmail.com", 587, timeout=30) as smtp:
-        smtp.ehlo()
-        smtp.starttls()
-        smtp.ehlo()
-        smtp.login(sender, app_password)
-        smtp.send_message(message)
+
+    try:
+        with urllib.request.urlopen(request, timeout=30) as response:
+            result = json.loads(response.read().decode("utf-8"))
+            print(f"Weekly analytics email accepted by Resend. Email ID: {result.get('id')}")
+
+    except urllib.error.HTTPError as exc:
+        error_body = exc.read().decode("utf-8", errors="replace")
+        raise RuntimeError(
+            f"Resend API returned HTTP {exc.code}: {error_body}"
+        ) from exc
+
+    except urllib.error.URLError as exc:
+        raise RuntimeError(
+            f"Could not connect to Resend API: {exc.reason}"
+        ) from exc
 
 
 def send_weekly_report(db: Session) -> dict:
     metrics = collect_weekly_metrics(db)
     pdf_bytes = generate_pdf(metrics)
     email_pdf_report(pdf_bytes, metrics)
+
     return {
         "status": "sent",
         "recipient": os.getenv("REPORT_RECIPIENT_EMAIL", "").strip(),
