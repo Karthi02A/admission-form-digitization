@@ -254,18 +254,31 @@ def email_pdf_report(pdf_bytes: bytes, metrics: dict) -> None:
 
     request = urllib.request.Request(
         url="https://api.resend.com/emails",
+        data=json.dumps(payload).encode("utf-8"),
         headers={
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json",
             "Accept": "application/json",
             "User-Agent": "Annai-Admission-Analytics/1.0",
-  },
+        },
+        method="POST",
     )
 
     try:
         with urllib.request.urlopen(request, timeout=30) as response:
-            result = json.loads(response.read().decode("utf-8"))
-            print(f"Weekly analytics email accepted by Resend. Email ID: {result.get('id')}")
+            response_body = response.read().decode("utf-8")
+            print(f"Resend HTTP Status: {response.status}")
+            print(f"Resend Response Body: {response_body}")
+
+            result = json.loads(response_body)
+            email_id = result.get("id")
+
+            if not email_id:
+                raise RuntimeError(
+                    f"Resend did not return an email ID. Response: {response_body}"
+                )
+
+            print(f"Weekly analytics email accepted by Resend. Email ID: {email_id}")
 
     except urllib.error.HTTPError as exc:
         error_body = exc.read().decode("utf-8", errors="replace")
