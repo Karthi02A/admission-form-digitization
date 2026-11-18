@@ -1,12 +1,13 @@
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.analytics.database import get_db
 from app.analytics.schemas import SessionHeartbeat, SessionIdentity
 from app.analytics.service import record_heartbeat, start_session
+from app.analytics.report_service import send_weekly_report, valid_report_token
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/analytics", tags=["Usage analytics"])
@@ -40,3 +41,20 @@ def session_heartbeat(
         db.rollback()
         logger.exception("Could not record analytics heartbeat")
         raise HTTPException(status_code=503, detail="Usage tracking is temporarily unavailable") from exc
+
+
+@router.post("/weekly-report/send")
+def send_weekly_analytics_report(
+    x_report_token: str | None = Header(default=None, alias="X-Report-Token"),
+    db: Session = Depends(get_db),
+):
+    """Generate and email the aggregate weekly report; intended for GitHub Actions."""
+    if not valid_report_token(x_report_token):
+        raise HTTPException(status_code=401, detail="Invalid report authorization")
+    try:
+        return send_weekly_report(db)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("Could not generate or send weekly analytics report")
+        raise HTTPException(status_code=503, detail="Weekly report could not be generated or sent") from exc

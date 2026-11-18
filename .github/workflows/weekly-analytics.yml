@@ -1,0 +1,29 @@
+name: Weekly Admission Analytics Email
+
+on:
+  schedule:
+    # 11:30 UTC = 17:00 Asia/Kolkata, every Friday.
+    - cron: '30 11 * * 5'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  send-weekly-report:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger weekly report on deployed FastAPI backend
+        env:
+          REPORT_API_URL: ${{ secrets.REPORT_API_URL }}
+          REPORT_TRIGGER_TOKEN: ${{ secrets.REPORT_TRIGGER_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "$REPORT_API_URL" ] || [ -z "$REPORT_TRIGGER_TOKEN" ]; then
+            echo "Missing REPORT_API_URL or REPORT_TRIGGER_TOKEN GitHub secrets."
+            exit 1
+          fi
+          curl --fail-with-body --silent --show-error \
+            --request POST \
+            --header "X-Report-Token: ${REPORT_TRIGGER_TOKEN}" \
+            "${REPORT_API_URL%/}/api/analytics/weekly-report/send"
