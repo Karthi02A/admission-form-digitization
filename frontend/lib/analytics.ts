@@ -1,7 +1,6 @@
 import { apiUrl } from "@/lib/api";
 
 const VISITOR_STORAGE_KEY = "admission_analytics_visitor_v1";
-const SESSION_STORAGE_KEY = "admission_analytics_session_v1";
 const SESSION_TIMEOUT_MS = 30 * 60 * 1000;
 const HEARTBEAT_INTERVAL_MS = 30 * 1000;
 
@@ -33,31 +32,32 @@ function getVisitorId(): string {
   }
 }
 
+// Keep one session identity for this loaded page. This prevents React
+// Strict Mode's development-only effect cleanup/setup cycle from creating
+// duplicate visits. A full page reload creates a fresh module context,
+// so the next page load receives a new session ID.
+let pageSession: StoredSession | null = null;
+
 function getSession(visitorId: string): { session: StoredSession; created: boolean } {
   const now = Date.now();
-  try {
-    const raw = window.localStorage.getItem(SESSION_STORAGE_KEY);
-    if (raw) {
-      const existing = JSON.parse(raw) as StoredSession;
-      if (
-        existing.visitorId === visitorId &&
-        existing.sessionId &&
-        Number.isFinite(existing.lastActivityAt) &&
-        now - existing.lastActivityAt <= SESSION_TIMEOUT_MS
-      ) {
-        return { session: existing, created: false };
-      }
-    }
-  } catch {
-    // Create a new session if stored data is unavailable or invalid.
+
+  if (
+    pageSession &&
+    pageSession.visitorId === visitorId &&
+    pageSession.sessionId &&
+    Number.isFinite(pageSession.lastActivityAt) &&
+    now - pageSession.lastActivityAt <= SESSION_TIMEOUT_MS
+  ) {
+    return { session: pageSession, created: false };
   }
 
-  const session = { visitorId, sessionId: createId(), lastActivityAt: now };
-  try {
-    window.localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(session));
-  } catch {
-    // The in-memory session still allows best-effort tracking for this page.
-  }
+  const session: StoredSession = {
+    visitorId,
+    sessionId: createId(),
+    lastActivityAt: now,
+  };
+
+  pageSession = session;
   return { session, created: true };
 }
 
@@ -106,11 +106,6 @@ export function startUsageTracking(): () => void {
     if (elapsedSeconds <= 0) return;
 
     session.lastActivityAt = now;
-    try {
-      window.localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(session));
-    } catch {
-      // Continue without persistence if browser storage is unavailable.
-    }
 
     void postAnalytics(
       "/api/analytics/session/heartbeat",
