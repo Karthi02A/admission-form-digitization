@@ -61,6 +61,21 @@ function getSession(visitorId: string): { session: StoredSession; created: boole
   return { session, created: true };
 }
 
+// Used by the upload workflow so document events can be attributed to the
+// same anonymous browser and page visit as the existing session tracker.
+export function getAnalyticsIdentity(): AnalyticsIdentity {
+  if (typeof window === "undefined") {
+    return { visitor_id: "", session_id: "" };
+  }
+
+  const visitorId = getVisitorId();
+  const { session } = getSession(visitorId);
+  return {
+    visitor_id: visitorId,
+    session_id: session.sessionId,
+  };
+}
+
 async function postAnalytics(path: string, body: object, keepalive = false): Promise<void> {
   try {
     await fetch(apiUrl(path), {

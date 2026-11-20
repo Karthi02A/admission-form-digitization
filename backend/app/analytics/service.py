@@ -74,3 +74,78 @@ def record_heartbeat(db: Session, payload: SessionHeartbeat) -> dict[str, int | 
     )
     db.commit()
     return {"status": "recorded", "active_seconds": payload.active_seconds}
+
+
+# Document-level analytics are best-effort: a PostgreSQL issue must never
+# interrupt admission uploads or AI extraction.
+def record_document_upload(
+    *,
+    document_id: str,
+    batch_id: str,
+    visitor_id: str | None,
+    session_id: str | None,
+    file_type: str,
+    file_size_bytes: int,
+    upload_status: str,
+    error_message: str | None = None,
+) -> None:
+    from app.analytics.database import SessionLocal
+    from app.analytics.models import DocumentUsage
+    import uuid
+
+    if SessionLocal is None:
+        return
+
+    db = SessionLocal()
+    try:
+        db.add(DocumentUsage(
+            usage_id=str(uuid.uuid4()),
+            document_id=document_id,
+            batch_id=batch_id,
+            visitor_id=visitor_id,
+            session_id=session_id,
+            file_type=(file_type or "unknown")[:20],
+            file_size_bytes=max(0, int(file_size_bytes or 0)),
+            upload_status=upload_status,
+            extraction_status="pending" if upload_status == "success" else "not_started",
+            uploaded_at=datetime.now(timezone.utc),
+            error_message=(error_message or "")[:1000] or None,
+        ))
+        db.commit()
+    except Exception:
+        db.rollback()
+    finally:
+        db.close()
+
+
+def update_document_extraction(
+    *,
+    document_id: str,
+    extraction_status: str,
+    extraction_duration_ms: int | None = None,
+    error_message: str | None = None,
+) -> None:
+    from app.analytics.database import SessionLocal
+    from app.analytics.models import DocumentUsage
+
+    if SessionLocal is None:
+        return
+
+    db = SessionLocal()
+    try:
+        row = db.query(DocumentUsage).filter(
+            DocumentUsage.document_id == document_id
+        ).first()
+        if row is not None:
+            row.extraction_status = extraction_status
+            row.extracted_at = datetime.now(timezone.utc)
+            row.extraction_duration_ms = (
+                max(0, int(extraction_duration_ms))
+                if extraction_duration_ms is not None else None
+            )
+            row.error_message = (error_message or "")[:1000] or None
+            db.commit()
+    except Exception:
+        db.rollback()
+    finally:
+        db.close()

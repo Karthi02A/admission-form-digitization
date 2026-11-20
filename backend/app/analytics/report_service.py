@@ -24,7 +24,7 @@ from reportlab.platypus import (
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.analytics.models import UserSession
+from app.analytics.models import UserSession, DocumentUsage
 
 REPORT_TZ = ZoneInfo(os.getenv("REPORT_TIMEZONE", "Asia/Kolkata"))
 
@@ -74,6 +74,38 @@ def collect_weekly_metrics(db: Session, now: datetime | None = None) -> dict:
         )
     ).all()
 
+    current_document_rows = db.execute(
+        select(DocumentUsage.upload_status, DocumentUsage.extraction_status,
+               DocumentUsage.extraction_duration_ms)
+        .where(DocumentUsage.uploaded_at >= start_utc,
+               DocumentUsage.uploaded_at < end_utc)
+    ).all()
+    previous_document_rows = db.execute(
+        select(DocumentUsage.upload_status, DocumentUsage.extraction_status,
+               DocumentUsage.extraction_duration_ms)
+        .where(DocumentUsage.uploaded_at >= previous_start_utc,
+               DocumentUsage.uploaded_at < start_utc)
+    ).all()
+
+    def summarize_documents(rows: list) -> dict:
+        successful_uploads = sum(1 for row in rows if row.upload_status == "success")
+        failed_uploads = sum(1 for row in rows if row.upload_status == "failed")
+        extraction_successes = sum(1 for row in rows if row.extraction_status == "success")
+        extraction_failures = sum(1 for row in rows if row.extraction_status == "failed")
+        durations = [
+            int(row.extraction_duration_ms)
+            for row in rows
+            if row.extraction_duration_ms is not None and row.extraction_status in {"success", "failed"}
+        ]
+        return {
+            "upload_attempts": len(rows),
+            "successful_uploads": successful_uploads,
+            "failed_uploads": failed_uploads,
+            "extraction_successes": extraction_successes,
+            "extraction_failures": extraction_failures,
+            "average_extraction_seconds": round(sum(durations) / len(durations) / 1000, 2) if durations else 0,
+        }
+
     def summarize(rows: list) -> dict:
         visitors = {row.visitor_id for row in rows}
         sessions = len(rows)
@@ -97,6 +129,8 @@ def collect_weekly_metrics(db: Session, now: datetime | None = None) -> dict:
 
     current = summarize(current_rows)
     previous = summarize(previous_rows)
+    current_documents = summarize_documents(current_document_rows)
+    previous_documents = summarize_documents(previous_document_rows)
     day_count = (end_local.date() - start_local.date()).days + 1
     days = [start_local.date() + timedelta(days=i) for i in range(max(day_count, 1))]
 
@@ -115,6 +149,8 @@ def collect_weekly_metrics(db: Session, now: datetime | None = None) -> dict:
         "period_label": f"{start_local:%d %b %Y %I:%M %p} – {end_local:%d %b %Y %I:%M %p} ({REPORT_TZ.key})",
         "current": {k: v for k, v in current.items() if k != "daily_visitors"},
         "previous": {k: v for k, v in previous.items() if k != "daily_visitors"},
+        "documents": current_documents,
+        "previous_documents": previous_documents,
         "daily_visitors": daily_rows,
         "changes": {
             "unique_visitors": _change(current["unique_visitors"], previous["unique_visitors"]),
@@ -180,6 +216,35 @@ def generate_pdf(metrics: dict) -> bytes:
         Spacer(1, 7 * mm)
     ]
 
+    documents = metrics.get("documents", {})
+    previous_documents = metrics.get("previous_documents", {})
+    document_data = [
+        ["Document metric", "This period", "Previous period"],
+        ["Upload attempts", str(documents.get("upload_attempts", 0)), str(previous_documents.get("upload_attempts", 0))],
+        ["Successful uploads", str(documents.get("successful_uploads", 0)), str(previous_documents.get("successful_uploads", 0))],
+        ["Failed uploads", str(documents.get("failed_uploads", 0)), str(previous_documents.get("failed_uploads", 0))],
+        ["Successful extractions", str(documents.get("extraction_successes", 0)), str(previous_documents.get("extraction_successes", 0))],
+        ["Failed extractions", str(documents.get("extraction_failures", 0)), str(previous_documents.get("extraction_failures", 0))],
+        ["Average extraction time", _duration(documents.get("average_extraction_seconds", 0)), _duration(previous_documents.get("average_extraction_seconds", 0))],
+    ]
+    document_table = Table(document_data, colWidths=[75 * mm, 47 * mm, 47 * mm], repeatRows=1)
+    document_table.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#5F9EA0")),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("FONTSIZE", (0, 0), (-1, -1), 8.5),
+        ("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#D7E0E0")),
+        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#F3F7F7")]),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("TOPPADDING", (0, 0), (-1, -1), 7),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 7),
+    ]))
+    story += [
+        Paragraph("Document upload and extraction activity", styles["Heading2"]),
+        document_table,
+        Spacer(1, 7 * mm),
+    ]
+
     daily_data = [["Date (India time)", "Unique visitors"]]
     daily_data.extend([
         [item["date"], str(item["visitors"])]
@@ -235,7 +300,12 @@ def email_pdf_report(pdf_bytes: bytes, metrics: dict) -> None:
         f"Unique visitors: {metrics['current']['unique_visitors']}\n"
         f"Total visits: {metrics['current']['total_sessions']}\n"
         f"Total active time: {_duration(metrics['current']['total_active_seconds'])}\n"
-        f"Average active time per visit: {_duration(metrics['current']['average_active_seconds'])}\n\n"
+        f"Average active time per visit: {_duration(metrics['current']['average_active_seconds'])}\n"
+        f"Document upload attempts: {metrics.get('documents', {}).get('upload_attempts', 0)}\n"
+        f"Successful uploads: {metrics.get('documents', {}).get('successful_uploads', 0)}\n"
+        f"Failed uploads: {metrics.get('documents', {}).get('failed_uploads', 0)}\n"
+        f"Successful extractions: {metrics.get('documents', {}).get('extraction_successes', 0)}\n"
+        f"Failed extractions: {metrics.get('documents', {}).get('extraction_failures', 0)}\n\n"
         "Regards,\nAdmission Analytics System"
     )
 

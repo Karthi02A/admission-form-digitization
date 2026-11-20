@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Annotated
 
-from fastapi import APIRouter, BackgroundTasks, File, UploadFile, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, File, Form, UploadFile, HTTPException, Query
 from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel, Field
 
@@ -17,6 +17,7 @@ from PIL import Image
 from app.services.extraction import extract_document_with_ai
 from app.config.ai_settings import load_ai_settings
 from app.services.exports import excel_bytes, csv_bytes
+from app.analytics.service import record_document_upload, update_document_extraction
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -138,7 +139,13 @@ def get_batch(batch_id: str):
 
 
 @router.post("/api/batches/{batch_id}/upload")
-async def upload(batch_id: str, files: Annotated[list[UploadFile], File(...)], extract_now: bool = Query(default=False, alias="extract")):
+async def upload(
+    batch_id: str,
+    files: Annotated[list[UploadFile], File(...)],
+    visitor_id: str | None = Form(default=None),
+    session_id: str | None = Form(default=None),
+    extract_now: bool = Query(default=False, alias="extract"),
+):
     b = store.get(batch_id)
     if not b:
         raise HTTPException(404, "Batch not found")
@@ -152,12 +159,16 @@ async def upload(batch_id: str, files: Annotated[list[UploadFile], File(...)], e
         ext = Path(name).suffix.lower()
         did = uuid.uuid4().hex
         target = FILES / f"{did}{ext}"
+        file_size_bytes = 0
+        upload_status = "failed"
+        error_message = None
         try:
             if ext not in ALLOWED:
                 raise ValueError("Only PDF, JPG, JPEG and PNG files are accepted")
             data = await f.read(MAX_BYTES + 1)
             if not data:
                 raise ValueError("File is empty")
+            file_size_bytes = len(data)
             if len(data) > MAX_BYTES:
                 raise ValueError(f"File exceeds {MAX_BYTES // (1024 * 1024)} MB")
             target.write_bytes(data)
@@ -178,12 +189,24 @@ async def upload(batch_id: str, files: Annotated[list[UploadFile], File(...)], e
                 "quality": quality,
             }
             b["documents"].append(d)
+            upload_status = "success"
             results.append({"document_id": did, "filename": name, "status": d["status"], "extraction_method": None, "quality": quality})
         except Exception as e:
+            error_message = str(e)
             if target.exists():
                 target.unlink()
-            results.append({"filename": name, "status": "failed", "error": str(e)})
+            results.append({"filename": name, "status": "failed", "error": error_message})
         finally:
+            record_document_upload(
+                document_id=did,
+                batch_id=batch_id,
+                visitor_id=visitor_id,
+                session_id=session_id,
+                file_type=ext.lstrip(".") or "unknown",
+                file_size_bytes=file_size_bytes,
+                upload_status=upload_status,
+                error_message=error_message,
+            )
             await f.close()
     b["updated_at"] = now()
     b["status"] = "ready_for_review" if b["documents"] else "empty"
@@ -229,9 +252,20 @@ def process_batch_extraction(batch_id: str) -> None:
                 "error": None,
                 "updated_at": now(),
             })
+            update_document_extraction(
+                document_id=document_data.get("document_id", ""),
+                extraction_status="success",
+                extraction_duration_ms=metrics.get("request_total_ms"),
+            )
         except Exception as error:
             logger.exception("AI extraction failed: batch_id=%s document_id=%s", batch_id, document_data.get("document_id"))
             document_data.update({"status": "failed", "error": str(error), "updated_at": now()})
+            update_document_extraction(
+                document_id=document_data.get("document_id", ""),
+                extraction_status="failed",
+                extraction_duration_ms=round((perf_counter() - started) * 1000),
+                error_message=str(error),
+            )
         batch["updated_at"] = now()
         store.save(batch)
     statuses = [d.get("status") for d in batch.get("documents", [])]
@@ -274,9 +308,20 @@ def extract_document(batch_id: str, doc_id: str):
         fields, field_confidence, quality, metrics = extract_document_with_ai(path)
         metrics["request_total_ms"] = round((perf_counter() - started) * 1000)
         document_data.update({"fields": fields, "field_confidence": field_confidence, "quality": quality, "extraction_method": f"{metrics.get('provider', 'ai')}_vision_api", "extraction_metrics": metrics, "status": "review_required" if quality["review_required"] else "extracted", "error": None, "updated_at": now()})
+        update_document_extraction(
+            document_id=doc_id,
+            extraction_status="success",
+            extraction_duration_ms=metrics.get("request_total_ms"),
+        )
     except Exception as error:
         logger.exception("AI extraction failed: batch_id=%s document_id=%s", batch_id, doc_id)
         document_data.update({"status": "failed", "error": str(error), "updated_at": now()})
+        update_document_extraction(
+            document_id=doc_id,
+            extraction_status="failed",
+            extraction_duration_ms=round((perf_counter() - started) * 1000),
+            error_message=str(error),
+        )
     batch["updated_at"] = now()
     # Preserve batch-level processing state if a background batch is running.
     if batch.get("status") not in {"queued", "processing"}:

@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ReviewScreen from "@/components/ReviewScreen";
 import UploadScreen from "@/components/UploadScreen";
 import { apiUrl, request } from "@/lib/api";
-import { startUsageTracking } from "@/lib/analytics";
+import { getAnalyticsIdentity, startUsageTracking } from "@/lib/analytics";
 import type { SaveState, StudentDocument, UploadEntry } from "@/lib/types";
 
 type BatchResponse = { batch_id: string };
@@ -260,6 +260,9 @@ export default function AdmissionWorkspace() {
 
       setProgress("Uploading and validating documents…");
       const form = new FormData();
+      const analyticsIdentity = getAnalyticsIdentity();
+      form.append("visitor_id", analyticsIdentity.visitor_id);
+      form.append("session_id", analyticsIdentity.session_id);
       files.forEach(entry => form.append("files", entry.file));
       const uploaded = await request<UploadResponse>(
         `/api/batches/${encodeURIComponent(batch.batch_id)}/upload`,
