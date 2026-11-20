@@ -3,7 +3,7 @@ name: Weekly Admission Analytics Email
 on:
   schedule:
     # 11:30 UTC = 17:00 Asia/Kolkata, every Friday.
-    - cron: '30 11 * * 5'
+    - cron: '10 13 * * 5'
   workflow_dispatch:
 
 permissions:
